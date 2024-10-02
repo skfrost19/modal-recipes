@@ -2,7 +2,13 @@ import modal
 
 modal_volume = modal.Volume.from_name("evaluation-results", create_if_missing=True)
 
-image = modal.Image.debian_slim(python_version="3.11").apt_install("git")
+image = (
+    modal.Image.debian_slim(python_version="3.11")
+    .apt_install("git")
+    .run_commands(
+        "git clone --depth 1 https://github.com/EleutherAI/lm-evaluation-harness && cd lm-evaluation-harness && pip install -e .",
+    )
+)
 MOUNT_DIR = "/root/lm-eval-results"
 
 app = modal.App(
@@ -12,7 +18,9 @@ app = modal.App(
 )
 
 
-@app.function(gpu="A100", timeout=7200)
+@app.function(
+    gpu="A100", timeout=7200, secrets=[modal.Secret.from_name("my-huggingface-secret")]
+)
 def evaluate(pretrained_models: list):
     """
     Evaluates a list of pretrained models using the lm-evaluation-harness.
@@ -22,7 +30,7 @@ def evaluate(pretrained_models: list):
     output directory.
 
     Args:
-        pretrained_models (list): A list of pretrained model identifiers to be evaluated.
+        pretrained_models (list): A list of pretrained model identifiers to be evaluated.function
 
     Raises:
         FileNotFoundError: If the lm_eval command is not found.
@@ -30,12 +38,9 @@ def evaluate(pretrained_models: list):
     import os
     import subprocess
 
-    os.chdir("/root")
-    os.system("git clone --depth 1 https://github.com/EleutherAI/lm-evaluation-harness")
-    os.chdir("lm-evaluation-harness")
-    os.system("pip install -e .")
+    os.chdir("/lm-evaluation-harness")
     print(f"Current working directory: {os.getcwd()}")
-
+    # os.system("huggingface-cli login --token $HF_TOKEN")
     for model in pretrained_models:
         process = subprocess.Popen(
             [
@@ -80,15 +85,12 @@ def main():
     Args:
         None
     """
-    pretrained_models = [
-        "skfrost19/mergekit-slerp-gurqemh",
-        "skfrost19/LLaMa-3-Bio_domain-merged",
-    ]
+    pretrained_models = ["meta-llama/Llama-3.2-1B"]
     evaluate.remote(pretrained_models)
 
 
 # To run this:
-# - Make sure you have modal api-key configured
+# - Make sure you have modal api-key configured and huggingface token configured in modal secrets.
 # - Run `modal run evaluation.py`
 # - You can check the results in the `evaluation-results` volume
 # - If you want to download the results, you can use the `modal volume get evaluation-results /` command and it will download the entire voulme content to your local machine.
