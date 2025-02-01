@@ -23,17 +23,20 @@ image = modal.Image.debian_slim(python_version="3.10").pip_install(
 )
 
 model_vol = modal.Volume.from_name("flux-model")
+loras_volume = modal.Volume.from_name("loras", create_if_missing=True)
+
 MODEL_DIR = "/flux-model"
+LORAS_DIR = "/loras"
 
 # Please set the secrets in the modal dashboard
-@app.function(image=image, volumes={MODEL_DIR: model_vol}, secrets=[modal.Secret.from_name("my-huggingface-secret")], timeout=32000)
+@app.function(image=image, volumes={MODEL_DIR: model_vol, LORAS_DIR: loras_volume}, secrets=[modal.Secret.from_name("my-huggingface-secret")], timeout=32000)
 def download_models(models: List[str]):
     # using huggingface-cli
     import os
 
     for model in models:
         local_dir_name = model.split("/")[-1]
-        os.system(f"huggingface-cli download {model} --local-dir {MODEL_DIR}/{local_dir_name}")
+        os.system(f"huggingface-cli download {model} --local-dir {LORAS_DIR}/{local_dir_name}")
         model_vol.commit()
 
         print(f"Downloaded {model}")
