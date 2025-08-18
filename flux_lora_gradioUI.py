@@ -1,6 +1,8 @@
 from pathlib import Path
 import modal
 from fastapi import FastAPI
+from typing import List
+
 
 app = modal.App(name="flux-dev")
 image = modal.Image.debian_slim(python_version="3.10").pip_install(
@@ -21,11 +23,27 @@ image = modal.Image.debian_slim(python_version="3.10").pip_install(
 
 volume = modal.Volume.from_name("flux-lora-private")
 model_vol = modal.Volume.from_name("flux-model")
+loras_volume = modal.Volume.from_name("loras", create_if_missing=True)
 MODEL_DIR = "/flux-model"
 CHECKPOINT_DIR = "/flux-lora-private"
+LORAS_DIR = "/loras"
 
 
-@app.cls(image=image, gpu="H100", volumes={MODEL_DIR: model_vol, CHECKPOINT_DIR: volume})
+# Please set the secrets in the modal dashboard
+@app.function(image=image, volumes={MODEL_DIR: model_vol, LORAS_DIR: loras_volume}, secrets=[modal.Secret.from_name("my-huggingface-secret")], timeout=32000)
+def download_models(models: List[str]):
+    # using huggingface-cli
+    import os
+
+    for model in models:
+        local_dir_name = model.split("/")[-1]
+        os.system(f"huggingface-cli download {model} --local-dir {LORAS_DIR}/{local_dir_name}")
+        model_vol.commit()
+
+        print(f"Downloaded {model}")
+
+
+@app.cls(image=image, gpu="H100", volumes={MODEL_DIR: model_vol, CHECKPOINT_DIR: volume, LORAS_DIR: loras_volume})
 class Model:
     @modal.enter()
     def load_model(self):
@@ -40,7 +58,7 @@ class Model:
             torch_dtype=torch.bfloat16,
         ).to("cuda")
 
-        lora_weights_path = f"{CHECKPOINT_DIR}/flux_lora_private/flux_lora_private.safetensors"
+        lora_weights_path = f"{LORAS_DIR}/Flux-Uncensored-V2/lora.safetensors"
         lora_weights = load_file(lora_weights_path)
         pipe.load_lora_weights(lora_weights)
 
@@ -111,6 +129,7 @@ def fastapi_app():
     return mount_gradio_app(app=web_app, blocks=interface, path="/")
 @app.local_entrypoint()
 def run():
+    # download_models.remote(["enhanceaiteam/Flux-Uncensored-V2"])
     fastapi_app.remote()
 
 
